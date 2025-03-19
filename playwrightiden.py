@@ -13,7 +13,6 @@ def save_session(context):
     context.storage_state(path=SESSION_FILE)
 
 def load_session(browser):
-    """Create a browser context, loading session if available."""
     if os.path.exists(SESSION_FILE):
         return browser.new_context(storage_state=SESSION_FILE)  
     return browser.new_context()
@@ -21,7 +20,7 @@ def load_session(browser):
 
 
 def login_and_save_session(page, context):
-    print("🔹 Logging in and saving session...")
+    print(" Logging in and saving session")
     page.goto(LOGIN_URL)
     page.get_by_role("textbox", name="Email").fill(USERNAME)
     page.get_by_role("textbox", name="Password").fill(PASSWORD)
@@ -32,105 +31,89 @@ def login_and_save_session(page, context):
     print(" Session saved successfully!")
 
 def launch_challenge(page):
-    print("🔹 Scrolling to find 'Launch Challenge' button...")
+    print("Scrolling to find Launch Challenge button")
     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
     page.wait_for_timeout(2000)  
-    print("🔹 Clicking 'Launch Challenge' button...")
+    print("Clicking Launch Challenge button")
     page.click("button:has-text('Launch Challenge')")
     page.wait_for_load_state("networkidle")
-    print("Challenge page loaded!")
+    print("Challenge page loaded")
 
 def navigate_to_product_table(page):
     page.get_by_role("button", name="Menu").click()
     page.wait_for_timeout(1000)
-    print("🔹 Clicking 'Data Tools'...")
+    print(" Clicking Data Tools")
     page.click("text=Data Tools")
     page.wait_for_selector("text=Inventory Management")
-    print("🔹 Clicking 'Inventory Management'...")
+    print(" Clicking Inventory Management")
     page.click("text=Inventory Management")
     page.wait_for_selector("text=Product Catalog")
-    print("🔹 Clicking 'Product Catalog'...")
+    print(" Clicking Product Catalog")
     page.dblclick("text=Product Catalog")
-    ensure_page_fully_loaded(page)
-
-
+   
     page.wait_for_load_state("networkidle")
     print(" Successfully navigated to Product Catalog!")
 
-
-def ensure_page_fully_loaded(page):
-    print("🔹 Scrolling to force content load...")
+def fast_scroll_to_bottom(page):
     
-    prev_height = -1
-    max_attempts = 10  
-    
-    for attempt in range(max_attempts):
-        curr_height = page.evaluate("document.body.scrollHeight")
+    print(" Fast scrolling to the bottom...")
 
-        if curr_height == prev_height:
-            print("✅ Reached the bottom of the page.")
-            break  
+    previous_height = -1
+    while True:
         
-        page.evaluate("window.scrollBy(0, 1000)")
-        page.wait_for_timeout(500)
-        prev_height = curr_height  
+        page.evaluate("window.scrollBy(0, 3000)")
+        page.wait_for_timeout(400)  
 
-    print("✅ Page fully loaded!")
+        
+        current_height = page.evaluate("document.body.scrollHeight")
 
+        if current_height == previous_height:
+            print("Reached the bottom, all data should be loaded.")
+            break  
 
+        previous_height =current_height
 
-def extract_all_table_data(page):
-    ensure_page_fully_loaded(page)
-  
-    print(" Extracting data from all tables...")
+def extract_all_product_cards(page):
+    fast_scroll_to_bottom(page)
+    print(" Extracting data from product cards")
 
     all_products = []
-    tables = page.query_selector_all("table")  
+    
+    cards = page.query_selector_all("div.grid > div")  
 
-    if not tables:
-        print("No tables found on the page!")
-        return []
+    print(f" Found {len(cards)} product cards.")
 
-    for table_index, table in enumerate(tables, start=1):
-        print(f"Extracting data from Table {table_index}...")
-        
-        rows = table.query_selector_all("tbody tr")
-        if not rows:
-            print(f"No rows found in Table {table_index}, skipping...")
-            continue
-
-        for row_index, row in enumerate(rows, start=1):
-            cells = row.query_selector_all("td")
-
+    for i, card in enumerate(cards):
+        try:
             
-            if len(cells) != 4:
-                print(f" Skipping row {row_index} in Table {table_index} (Expected 4 cells, found {len(cells)})")
-                continue  
+            title_element = card.query_selector("div.h-12.flex.items-center.justify-center.font-medium.text-white")
+            title = title_element.inner_text().strip() if title_element else "N/A"
 
-            try:
-                product = {
-                    "table_index": table_index,
-                    "row_index": row_index,
-                    "ID": cells[0].inner_text().strip(),
-                    "Material": cells[1].inner_text().strip(),
-                    "Weight (kg)": cells[2].inner_text().strip(),
-                    "Last Updated": cells[3].inner_text().strip(),
-                }
-                all_products.append(product)
+           
+            details = card.query_selector_all("div.flex.items-center.justify-between")
+            product_data = {"Title": title}
 
-            except Exception as e:
-                print(f" Error extracting row {row_index} in Table {table_index}: {e}")
+            for detail in details:
+                spans = detail.query_selector_all("span")
+                if len(spans) == 2:
+                    key = spans[0].inner_text().strip().replace(":", "")
+                    value = spans[1].inner_text().strip()
+                    product_data[key] = value
+
+            all_products.append(product_data)
+        
+
+        except Exception as e:
+            print(f" Error extracting product {i+1}: {e}")
 
     print(f" Extracted {len(all_products)} products.")
     return all_products
 
 
-
-
 def save_to_json(data, filename="products.json"):
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4)
-    print(f"✅ Data saved to {filename}")
+    print(f" Data saved to {filename}")
 
 def main():
     with sync_playwright() as p:
@@ -141,15 +124,10 @@ def main():
         html_content = page.content()
         print(html_content)  
 
-
         login_and_save_session(page, context)
         launch_challenge(page)
         navigate_to_product_table(page)
-
-        ensure_page_fully_loaded(page)
-
-
-        product_data = extract_all_table_data(page)
+        product_data = extract_all_product_cards(page)
         save_to_json(product_data)
 
         browser.close()  
